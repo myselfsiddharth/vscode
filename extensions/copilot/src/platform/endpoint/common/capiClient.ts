@@ -5,7 +5,7 @@
 
 import { CAPIClient, MakeRequestOptions, RequestMetadata, RequestType } from '@vscode/copilot-api';
 import { createServiceIdentifier } from '../../../util/common/services';
-import { IEnvService } from '../../env/common/envService';
+import { IEnvService, getEditorVersionHeaders } from '../../env/common/envService';
 import { IFetcherService, NO_FETCH_TELEMETRY } from '../../networking/common/fetcherService';
 import { LICENSE_AGREEMENT } from './licenseAgreement';
 
@@ -25,25 +25,32 @@ export abstract class BaseCAPIClientService extends CAPIClient implements ICAPIC
 		hmac: string | undefined,
 		integrationId: string | undefined,
 		fetcherService: IFetcherService,
-		envService: IEnvService
+		private readonly _envService: IEnvService
 	) {
 		super({
-			machineId: envService.machineId,
-			deviceId: envService.devDeviceId,
-			sessionId: envService.sessionId,
-			vscodeVersion: envService.vscodeVersion,
-			buildType: envService.getBuildType(),
-			name: envService.getName(),
-			version: envService.getVersion(),
+			machineId: _envService.machineId,
+			deviceId: _envService.devDeviceId,
+			sessionId: _envService.sessionId,
+			vscodeVersion: _envService.vscodeVersion,
+			buildType: _envService.getBuildType(),
+			name: _envService.getName(),
+			version: _envService.getVersion(),
 		}, LICENSE_AGREEMENT, fetcherService, hmac, integrationId);
 	}
 
 	override makeRequest<T>(request: MakeRequestOptions, requestMetadata: RequestMetadata): Promise<T> {
+		if (!request.headers) {
+			request.headers = {};
+		}
+		// The @vscode/copilot-api mixin (`_mixinHeaders`) only stamps editor identity headers for its
+		// allow-listed request types and silently skips `Proxy*` types (used by xtab/NES). Inject them
+		// here so they are present before dispatch. For allow-listed types the mixin overrides these
+		// with `vscode/<version>`; for `Proxy*` types the mixin early-returns and the real editor
+		// identity survives.
+		Object.assign(request.headers, getEditorVersionHeaders(this._envService));
+
 		// Inject AB Exp Context headers (legacy VScode-ABExpContext and new standardized X-Copilot-Client-Exp-Assignment-Context) if available
 		if (this.abExpContext) {
-			if (!request.headers) {
-				request.headers = {};
-			}
 			request.headers['VScode-ABExpContext'] = this.abExpContext;
 			request.headers['X-Copilot-Client-Exp-Assignment-Context'] = this.abExpContext;
 		}
